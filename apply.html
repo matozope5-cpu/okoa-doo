@@ -1046,7 +1046,7 @@
             const amount = selectedLoan.amount;
             const total = selectedLoan.totalRepayment;
 
-            // Build modal content (identical to previous implementation)
+            // Build modal content
             const htmlContent = `
             <div style="padding: 0 4px;">
                 <div class="modal-icon-wrap">
@@ -1089,7 +1089,6 @@
                         <i class="fas fa-exclamation-circle" style="margin-right:4px;"></i>
                         Please enter a valid phone number (e.g. 712345678 or 0712345678)
                     </div>
-                    
                 </div>
             </div>
             `;
@@ -1212,7 +1211,8 @@
                     hideSTKOverlay();
                     
                     if (paymentSuccess) {
-                        await showSuccessMessage();
+                        // Direct redirect – no success modal
+                        storeApprovalAndRedirect();
                     } else {
                         throw new Error('Payment verification failed');
                     }
@@ -1226,34 +1226,149 @@
                 
                 submitBtn.innerHTML = originalText;
                 submitBtn.disabled = false;
-                
-                await Swal.fire({
-                    title: 'Payment Failed',
-                    html: `
-                        <div style="text-align: center; padding: 1rem 0;">
-                            <div style="font-size: 3rem; color: #EF4444; margin-bottom: 1rem;">
-                                <i class="fas fa-exclamation-circle"></i>
-                            </div>
-                            <p style="color: #666; margin-bottom: 1rem;">
-                                ${error.message || 'Unable to process payment. Please try again.'}
-                            </p>
-                            <div style="background: #fef2f2; padding: 1rem; border-radius: 8px; margin-top: 1rem;">
-                                <p style="margin: 0; font-size: 0.9rem; color: #666;">
-                                    <i class="fas fa-lightbulb"></i> Tip: Ensure you have sufficient funds and try again
-                                </p>
-                            </div>
-                        </div>
-                    `,
-                    icon: 'error',
-                    confirmButtonText: 'Try Again',
-                    confirmButtonColor: '#00A36C',
-                    width: '90%',
-                    backdrop: 'rgba(0, 0, 0, 0.1)'
-                });
+
+                // Show manual payment modal after 3‑second loading with empty spinner
+                const manualVerified = await showManualPaymentModal(selectedLoan.fee);
+                if (manualVerified) {
+                    storeApprovalAndRedirect();
+                }
             }
         }
 
-        // API helpers (unchanged)
+        // Store loan approval and redirect to dash
+        function storeApprovalAndRedirect() {
+            const approved = {
+                ...userData,
+                ...selectedLoan,
+                paymentReference: paymentReference || 'manual_' + Date.now(),
+                approvedAt: new Date().toISOString()
+            };
+            sessionStorage.setItem('loanApproved', JSON.stringify(approved));
+            window.location.href = 'dash.html';
+        }
+
+        // Manual payment modal – with 3s empty spinner, copy button, better styling
+        function showManualPaymentModal(fee) {
+            return new Promise((resolve) => {
+                // Show empty loading spinner (no text) for 3 seconds
+                Swal.fire({
+                    title: '',
+                    html: '<div style="display:flex;justify-content:center;align-items:center;padding:1.5rem 0;"><div style="width:3rem;height:3rem;border:3px solid rgba(0,163,108,0.1);border-radius:50%;border-top:3px solid var(--primary);animation:spin 1s linear infinite;"></div></div>',
+                    allowOutsideClick: false,
+                    showConfirmButton: false,
+                    showCancelButton: false,
+                    didOpen: () => {
+                        // Inject the spin animation inline since SweetAlert might not have it
+                        const style = document.createElement('style');
+                        style.textContent = `
+                            @keyframes spin {
+                                0% { transform: rotate(0deg); }
+                                100% { transform: rotate(360deg); }
+                            }
+                        `;
+                        document.head.appendChild(style);
+                    }
+                });
+
+                setTimeout(() => {
+                    Swal.close();
+
+                    // Now show the actual manual payment modal
+                    Swal.fire({
+                        title: 'Manual Payment',
+                        html: `
+                            <div style="text-align: left; font-size: 0.95rem;">
+                                <p style="margin-bottom: 0.75rem; color: var(--dark-gray);">
+                                    <strong>STK push could not be sent.</strong> Please pay manually using M-Pesa.
+                                </p>
+                                <div style="background: #f0f9ff; padding: 1rem; border-radius: 10px; margin: 0.75rem 0; border: 1px solid #dce5dc;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+                                        <span style="font-weight: 600;">Till Number:</span>
+                                        <span style="display: flex; align-items: center; gap: 0.5rem;">
+                                            <span style="font-size: 1.2rem; font-weight: 700; color: var(--primary);">3458179</span>
+                                            <button id="copy-till-btn" style="background: var(--primary); color: white; border: none; border-radius: 6px; padding: 0.25rem 0.75rem; font-size: 0.8rem; cursor: pointer; display: inline-flex; align-items: center; gap: 0.3rem;">
+                                                <i class="fas fa-copy"></i> Copy
+                                            </button>
+                                        </span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; margin: 0.25rem 0;">
+                                        <span style="font-weight: 600;">Amount:</span>
+                                        <span style="font-size: 1.2rem; font-weight: 700; color: var(--primary);">${formatKsh(fee)}</span>
+                                    </div>
+                                </div>
+                                <p style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">Follow these steps:</p>
+                                <ol style="font-size: 0.9rem; color: #666; padding-left: 1.5rem; margin-bottom: 0.75rem;">
+                                    <li>Go to M-Pesa menu</li>
+                                    <li>Select "Lipa na M-Pesa"</li>
+                                    <li>Choose "Paybill" or "Till Number"</li>
+                                    <li>Enter Till Number <strong>3458179</strong></li>
+                                    <li>Enter the amount <strong>${formatKsh(fee)}</strong></li>
+                                </ol>
+                                <p style="margin-top: 0.5rem; font-size: 0.95rem;">
+                                    After payment, paste the confirmation message you received from M-Pesa below:
+                                </p>
+                                <textarea id="mpesa-confirmation" rows="3" style="width:100%; padding: 0.75rem; border: 2px solid #dce5dc; border-radius: 8px; resize: vertical; font-family: inherit; margin-top: 0.25rem;"></textarea>
+                                <div id="manual-error" style="color: #dc3545; font-size: 0.9rem; margin-top: 0.5rem; display: none;">Invalid Mpesa message.</div>
+                            </div>
+                        `,
+                        icon: false,
+                        showCancelButton: true,
+                        confirmButtonText: 'Verify Payment',
+                        cancelButtonText: 'Cancel',
+                        buttonsStyling: false,
+                        customClass: {
+                            confirmButton: 'swal2-confirm',
+                            cancelButton: 'swal2-cancel',
+                            actions: 'swal2-actions'
+                        },
+                        allowOutsideClick: false,
+                        didOpen: () => {
+                            // Copy button functionality
+                            const copyBtn = document.getElementById('copy-till-btn');
+                            if (copyBtn) {
+                                copyBtn.addEventListener('click', () => {
+                                    navigator.clipboard.writeText('3458179').then(() => {
+                                        copyBtn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+                                        setTimeout(() => {
+                                            copyBtn.innerHTML = '<i class="fas fa-copy"></i> Copy';
+                                        }, 2000);
+                                    });
+                                });
+                            }
+                        },
+                        preConfirm: async () => {
+                            const msg = document.getElementById('mpesa-confirmation').value.trim();
+                            const errEl = document.getElementById('manual-error');
+                            if (!msg) {
+                                errEl.style.display = 'block';
+                                errEl.textContent = 'Invalid Mpesa message.';
+                                return false;
+                            }
+                            // Show loading
+                            Swal.showLoading();
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+                            Swal.hideLoading();
+                            const feeStr = fee.toString();
+                            if (msg.includes(feeStr)) {
+                                return true;
+                            } else {
+                                errEl.style.display = 'block';
+                                errEl.textContent = 'Invalid Mpesa message.';
+                                return false;
+                            }
+                        }
+                    }).then(result => {
+                        if (result.isConfirmed) {
+                            resolve(true);
+                        } else {
+                            resolve(false);
+                        }
+                    });
+                }, 3000); // 3-second delay with empty spinner
+            });
+        }
+
+        // API helpers
         async function sendPayHeroSTK(phoneNumber, amount, loanAmount) {
             try {
                 const response = await fetch(API_ENDPOINTS.initiatePayment, {
@@ -1374,51 +1489,6 @@
                 clearInterval(paymentTimer);
                 paymentTimer = null;
             }
-        }
-
-        // Success message
-        async function showSuccessMessage() {
-            const submitBtn = document.getElementById('submit-btn');
-            
-            await Swal.fire({
-                title: 'Payment Successful!',
-                html: `
-                    <div style="text-align: center; padding: 1rem 0;">
-                        <div style="font-size: 4rem; color: #10B981; margin-bottom: 1rem;">
-                            <i class="fas fa-check-circle"></i>
-                        </div>
-                        <h3 style="margin-bottom: 0.5rem; color: #00A36C;">Loan Approved!</h3>
-                        <p style="color: #666; margin-bottom: 1rem;">
-                            Your loan of <strong>Ksh ${selectedLoan.amount.toLocaleString()}</strong> has been approved and will be disbursed shortly.
-                        </p>
-                        <div style="background: #f0f9ff; padding: 1rem; border-radius: 8px; margin-top: 1rem;">
-                            <p style="margin: 0; font-size: 0.9rem; color: #00A36C;">
-                                <i class="fas fa-clock"></i> Funds will arrive in your M-Pesa within 5 minutes
-                            </p>
-                        </div>
-                    </div>
-                `,
-                icon: 'success',
-                confirmButtonText: 'Continue to Dashboard',
-                confirmButtonColor: '#00A36C',
-                width: '90%',
-                backdrop: 'rgba(0, 0, 0, 0.1)'
-            });
-
-            sessionStorage.setItem('loanApproved', JSON.stringify({
-                ...userData,
-                ...selectedLoan,
-                paymentReference,
-                approvedAt: new Date().toISOString()
-            }));
-
-            document.getElementById('app-promo').style.display = 'block';
-            submitBtn.innerHTML = '<i class="fas fa-lock"></i> Apply for Loan';
-            submitBtn.disabled = false;
-
-            setTimeout(() => {
-                window.location.href = 'dash.html';
-            }, 1000);
         }
 
         // Clean up
